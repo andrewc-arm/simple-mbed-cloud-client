@@ -370,6 +370,10 @@ void SimpleMbedCloudClient::on_unregistered(Callback<void()> cb) {
     _unregistered_cb = cb;
 }
 
+void SimpleMbedCloudClient::reformat_storage() {
+    _storage.reformat_storage();
+}
+
 MbedCloudClient& SimpleMbedCloudClient::get_cloud_client() {
     return _cloud_client;
 }

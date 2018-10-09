@@ -213,8 +213,6 @@ public:
     int reformat_storage(void) {
         int status = -1;
 
-        printf("I have bd? %p\n", _bd);
-
         if (_bd) {
     #if (NUMBER_OF_PARTITIONS > 0)
             status = reformat_partition(fs1, part1);
