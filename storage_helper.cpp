@@ -17,6 +17,9 @@
 // ----------------------------------------------------------------------------
 
 #include "storage_helper.h"
+#include "mbed_trace.h"
+
+#define TRACE_GROUP "SMCS"
 
 StorageHelper::StorageHelper(BlockDevice *bd, FileSystem *fs)
     : _bd(bd), _fs(fs)
@@ -34,7 +37,7 @@ int StorageHelper::init() {
             status = bd->init();
 
             if (status != BD_ERROR_OK) {
-                printf("[SMCC] StorageHelper::init() - bd->init() failed with %d\n", status);
+                tr_warn("bd->init() failed with %d", status);
                 return -1;
             }
 
@@ -42,8 +45,7 @@ int StorageHelper::init() {
             // store partition size
             mcc_platform_storage_size = bd->size();
 #endif
-            // printf("[SMCC] StorageHelper::init() - bd->size() = %llu\n", bd->size());
-            // printf("[SMCC] StorageHelper::init() - BlockDevice init OK\n");
+            tr_debug("init() - BlockDevice init OK, bd->size() = %llu", bd->size());
         }
 
 #if (MCC_PLATFORM_PARTITION_MODE == 1)
@@ -56,7 +58,7 @@ int StorageHelper::init() {
                 return status;
             }
 #else
-            printf("[SMCC] StorageHelper::init() - primary partition init fail!!!\n");
+            tr_warn("primary partition init failed");
             return status;
 #endif
         }
@@ -70,7 +72,7 @@ int StorageHelper::init() {
                 return status;
             }
 #else
-            printf("[SMCC] StorageHelper::init() - secondary partition init fail!!!\n");
+            tr_warn("secondary partition init failed");
             return status;
 #endif
         }
@@ -84,10 +86,10 @@ int StorageHelper::init() {
     part1 = bd;                   /* required for mcc_platform_reformat_storage */
     status = test_filesystem(fs1, bd);
     if (status != 0) {
-        printf("[SMCC] Formatting ...\n");
+        tr_info("Formatting...");
         status = reformat_partition(fs1, bd);
         if (status != 0) {
-            printf("[SMCC] Formatting failed with 0x%X !!!\n", status);
+            tr_warn("Formatting failed with 0x%X", status);
             return status;
         }
     }
@@ -95,7 +97,7 @@ int StorageHelper::init() {
         init_done = true;
     }
     else {
-        printf("StorageHelper::init() - init already done\n");
+        tr_debug("init already done");
     }
 
     return status;
@@ -111,7 +113,7 @@ int StorageHelper::sotp_init(void)
     status = fcc_entropy_set(MBED_CLOUD_DEV_ENTROPY, FCC_ENTROPY_SIZE);
 
     if (status != FCC_STATUS_SUCCESS && status != FCC_STATUS_ENTROPY_ERROR) {
-        printf("[SMCC] fcc_entropy_set failed with status %d! - exit\n", status);
+        tr_error("fcc_entropy_set failed with status %d", status);
         fcc_finalize();
         return status;
     }
@@ -122,11 +124,11 @@ int StorageHelper::sotp_init(void)
     status = fcc_rot_set(MBED_CLOUD_DEV_ROT, FCC_ROT_SIZE);
 
     if (status != FCC_STATUS_SUCCESS && status != FCC_STATUS_ROT_ERROR) {
-        printf("[SMCC] fcc_rot_set failed with status %d! - exit\n", status);
+        tr_error("fcc_rot_set failed with status %d", status);
         fcc_finalize();
     } else {
         // We can return SUCCESS here as preexisting RoT/Entropy is expected flow.
-        printf("[SMCC] Using hardcoded Root of Trust, not suitable for production use.\n");
+        tr_info("Using hardcoded Root of Trust, not suitable for production use");
         status = FCC_STATUS_SUCCESS;
     }
 #endif // PAL_USER_DEFINED_CONFIGURATION
@@ -142,13 +144,13 @@ int StorageHelper::reformat_storage(void) {
 #if (NUMBER_OF_PARTITIONS > 0)
         status = reformat_partition(fs1, part1);
         if (status != 0) {
-            printf("[SMCC] Formatting primary partition failed with 0x%X !!!\n", status);
+            tr_warn("Formatting primary partition failed with 0x%X", status);
             return status;
         }
 #if (NUMBER_OF_PARTITIONS == 2)
         status = reformat_partition(fs2, part2);
         if (status != 0) {
-            printf("[SMCC] Formatting secondary partition failed with 0x%X !!!\n", status);
+            tr_warn("Formatting secondary partition failed with 0x%X", status);
             return status;
         }
 #endif
@@ -162,7 +164,7 @@ int StorageHelper::reformat_storage(void) {
 #endif
     }
 
-    printf("[SMCC] Storage reformatted (%d)\n", status);
+    tr_info("Storage reformatted (%d)", status);
 
     return status;
 }
@@ -180,7 +182,7 @@ int StorageHelper::init_and_mount_partition(FileSystem **fs, BlockDevice** part,
         status = (**part).init();
         if (status != 0) {
             (**part).deinit();
-            printf("[SMCC] Init of partition %d fail !!!\n", number_of_partition);
+            tr_warn("Init of partition %d fail", number_of_partition);
             return status;
         }
         /* This next change mean that filesystem will be FAT. */
@@ -191,24 +193,24 @@ int StorageHelper::init_and_mount_partition(FileSystem **fs, BlockDevice** part,
         status = (**part).init();
         if (status != 0) {
             (**part).deinit();
-            printf("[SMCC] Init of partition %d fail !!!\n", number_of_partition);
+            tr_warn("Init of partition %d fail", number_of_partition);
             return status;
         }
 
-        printf("[SMCC] Formatting partition %d ...\n", number_of_partition);
+        tr_debug("Formatting partition %d ...", number_of_partition);
         status = reformat_partition(&(**fs), &(**part));
         if (status != 0) {
-            printf("[SMCC] Formatting partition %d failed with 0x%X !!!\n", number_of_partition, status);
+            tr_warn("Formatting partition %d failed with 0x%X", number_of_partition, status);
             return status;
         }
     }
 
     status = test_filesystem(&(**fs), &(**part));
     if (status != 0) {
-        printf("[SMCC] Formatting partition %d ...\n", number_of_partition);
+        tr_debug("Formatting partition %d ...", number_of_partition);
         status = reformat_partition(&(**fs), &(**part));
         if (status != 0) {
-            printf("[SMCC] Formatting partition %d failed with 0x%X !!!\n", number_of_partition, status);
+            tr_warn("Formatting partition %d failed with 0x%X", number_of_partition, status);
             return status;
         }
     }
@@ -218,15 +220,7 @@ int StorageHelper::init_and_mount_partition(FileSystem **fs, BlockDevice** part,
 #endif
 
 int StorageHelper::reformat_partition(FileSystem *fs, BlockDevice* part) {
-    int status;
-
-    printf("[SMCC] reformat_partition\n");
-    status = fs->reformat(part);
-    if (status != 0) {
-        printf("[SMCC] Reformat partition failed with error %d\n", status);
-    }
-
-    return status;
+    return fs->reformat(part);
 }
 
 /* help function for testing filesystem availbility by umount and
@@ -236,13 +230,13 @@ int StorageHelper::test_filesystem(FileSystem *fs, BlockDevice* part) {
     // unmount
     int status = fs->unmount();
     if (status != 0) {
-        printf("[SMCC] test_filesystem() - unmount fail %d.\n", status);
+        tr_info("test_filesystem() - unmount fail %d", status);
         return -1;
     }
     // mount again
     status = fs->mount(part);
     if (status != 0) {
-        printf("[SMCC] test_filesystem() - mount fail %d.\n", status);
+        tr_info("test_filesystem() - mount fail %d", status);
         return -1;
     }
     return status;
@@ -255,46 +249,51 @@ static int StorageHelper::create_partitions(void) {
 
 #if (NUMBER_OF_PARTITIONS > 0)
     if (mcc_platform_storage_size < PRIMARY_PARTITION_SIZE) {
-        printf("[SMCC] create_partitions PRIMARY_PARTITION_SIZE too large!!! Storage's size is %" PRIu64 \
-                " and PRIMARY_PARTITION_SIZE is %" PRIu64 "\n",
+        tr_error("create_partitions PRIMARY_PARTITION_SIZE too large!!! Storage's size is %" PRIu64 \
+                " and PRIMARY_PARTITION_SIZE is %" PRIu64,
                 (uint64_t)mcc_platform_storage_size, (uint64_t)PRIMARY_PARTITION_SIZE);
         assert(0);
     }
 
     status = MBRBlockDevice::partition(bd, PRIMARY_PARTITION_NUMBER, 0x83, PRIMARY_PARTITION_START, PRIMARY_PARTITION_START + PRIMARY_PARTITION_SIZE);
-    printf("[SMCC] Creating primary partition ...\n");
+    tr_debug("Creating primary partition ...");
     if (status != 0) {
-        printf("[SMCC] Creating primary partition fail 0x%X !!!\n", status);
+        tr_warn("Creating primary partition failed 0x%X", status);
         return status;
     }
+    tr_debug("Created primary partition");
 
     // init and format partition 1
     status = init_and_mount_partition(&fs1, &part1, PRIMARY_PARTITION_NUMBER, ((const char*) MOUNT_POINT_PRIMARY+1));
     if (status != 0) {
         return status;
     }
+    tr_debug("Mounted primary partition");
+
 #if (NUMBER_OF_PARTITIONS == 2)
     // use cast (uint64_t) for fixing compile warning.
     if (mcc_platform_storage_size < ((uint64_t)PRIMARY_PARTITION_SIZE + (uint64_t)SECONDARY_PARTITION_SIZE)) {
-        printf("[SMCC] create_partitions (PRIMARY_PARTITION_SIZE+SECONDARY_PARTITION_SIZE) too large!!! Storage's size is %" PRIu64 \
-                " and (PRIMARY_PARTITION_SIZE+SECONDARY_PARTITION_SIZE) %" PRIu64 "\n",
+        tr_error("create_partitions (PRIMARY_PARTITION_SIZE+SECONDARY_PARTITION_SIZE) too large!!! Storage's size is %" PRIu64 \
+                " and (PRIMARY_PARTITION_SIZE+SECONDARY_PARTITION_SIZE) %" PRIu64,
                 (uint64_t)mcc_platform_storage_size, (uint64_t)(PRIMARY_PARTITION_SIZE+SECONDARY_PARTITION_SIZE));
         assert(0);
     }
 
     // use cast (uint64_t) for fixing compile warning.
     status = MBRBlockDevice::partition(bd, SECONDARY_PARTITION_NUMBER, 0x83, SECONDARY_PARTITION_START, (uint64_t) SECONDARY_PARTITION_START + (uint64_t) SECONDARY_PARTITION_SIZE);
-    printf("[SMCC] Creating secondary partition ...\n");
+    tr_debug("Creating secondary partition ...");
     if (status != 0) {
-        printf("[SMCC] Creating secondary partition fail 0x%X !!!\n", status);
+        tr_warn("Creating secondary partition failed 0x%X", status);
         return status;
     }
+    tr_debug("Created secondary partition");
 
     // init and format partition 2
     status = init_and_mount_partition(&fs2, &part2, SECONDARY_PARTITION_NUMBER, ((const char*) MOUNT_POINT_SECONDARY+1));
     if (status != 0) {
         return status;
     }
+    tr_debug("Mounted secondary partition");
 #endif
 #if (NUMBER_OF_PARTITIONS > 2)
 #error "Invalid number of partitions!!!"
