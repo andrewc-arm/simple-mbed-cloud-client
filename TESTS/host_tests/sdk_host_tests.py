@@ -26,104 +26,165 @@ import subprocess
 DEFAULT_CYCLE_PERIOD = 1.0
 
 class SDKTests(BaseHostTest):
-    
+
     __result = None
     deviceApi = None
     connectApi = None
     deviceID = None
     iteration = None
-    
+    post_timeout = None
+
+    def send_safe(self, key, value):
+        #self.send_kv('dummy_start', 0)
+        self.send_kv(key, value)
+        self.send_kv(key, value)
+        self.send_kv(key, value)
+        self.send_kv(key, value)
+        self.send_kv(key, value)
+        #self.send_kv('dummy_end', 1)
+
     def test_steps(self):
         # Step 0 set up test
-        global iteration
         system_reset = yield
-        
+
         # Step 1 device connected to Pelion should reset.
-        self.send_kv('reset', 0)
+        self.send_safe('reset', 0)
         time.sleep(self.program_cycle_s)
-        self.send_kv('__sync', 0)
-        iteration = iteration + 1
-        system_reset = yield   
-        
+        self.send_safe('__sync', 0)
+        self.iteration = self.iteration + 1
+        system_reset = yield
+
         #Step 2, finish
         yield True
-        
+
     def _callback_device_ready(self, key, value, timestamp):
         # Send device iteration number after a reset
-        global iteration
-        self.send_kv('iteration', iteration)
-    
+        self.send_safe('iteration', self.iteration)
+
     def _callback_advance_test(self, key, value, timestamp):
         # Advance test sequence
-        try: 
+        try:
             if self.test_steps_sequence.send(None):
                 self.notify_complete(True)
         except (StopIteration, RuntimeError) as exc:
             self.notify_complete(False)
-        
+
     def _callback_device_api_registration(self, key, value, timestamp):
-        global deviceID
         try:
             #set value for later use
-            deviceID = value
-            
+            self.deviceID = value
+
             # Check if device is in Mbed Cloud Device Directory
             device = self.deviceApi.get_device(value)
-            
+
             # Send registraton status to device
-            self.send_kv("registration_status", device.state)
-            
+            self.send_safe("registration", 1 if device.state == "registered" else 0)
         except:
             # SDK throws an exception if the device is not found (unsuccessful registration) or times out
-            self.send_kv("registration_status", "error")
-            
+            self.send_safe("registration", 0)
+
     def _callback_device_verification(self, key, value, timestamp):
-        global deviceID
         # Send true if old DeviceID is the same as current device is
-        self.send_kv("verification", (deviceID == value))
-        
+        self.send_safe("verification", 1 if self.deviceID == value else 0)
+
     def _callback_fail_test(self, key, value, timestamp):
         # Test failed. End it.
         self.notify_complete(False)
-        
-    def _callback_device_lwm2m_get_verification(self, key, value, timestamp):
-        global deviceID
-        
-        # Get resource value from device
-        resource_value = self.connectApi.get_resource_value(deviceID, value)
-        
-        # Send resource value back to device
-        self.send_kv("res_value", resource_value)
-    
-    def _callback_device_lwm2m_put_verification(self, key, value, timestamp):
-        global deviceID
-        
-        # Get resource value from device and increment it
-        resource_value = self.connectApi.get_resource_value(deviceID, value)
-        updated_value = int(resource_value) + 5  
-        
-        # Set new resource value from cloud
-        self.connectApi.set_resource_value(deviceID, value, updated_value)
 
-        # Send new resource value to device for verification.
-        self.send_kv("res_set", updated_value);
-        
+    def _callback_device_lwm2m_get_verification(self, key, value, timestamp):
+        timeout = 0
+
+        # Get resource value from device
+        async_response = self.connectApi.get_resource_value_async(self.deviceID, value)
+
+        # Set a 30 second timeout here.
+        while not async_response.is_done and timeout <= 300:
+            time.sleep(0.1)
+            timeout += 1
+
+        if async_response.is_done:
+            # Send resource value back to device
+            self.send_safe("get_value", async_response.value)
+        else:
+            # Request timed out.
+            self.send_safe("timeout", 0)
+
+    def _callback_device_lwm2m_set_verification(self, key, value, timestamp):
+        timeout = 0
+
+        # Get resource value from device
+        async_response = self.connectApi.get_resource_value_async(self.deviceID, value)
+
+        # Set a 30 second timeout here.
+        while not async_response.is_done and timeout <= 300:
+            time.sleep(0.1)
+            timeout += 1
+
+        if async_response.is_done:
+            # Send resource value back to device
+            self.send_safe("set_value", async_response.value)
+        else:
+            # Request timed out.
+            self.send_safe("timeout", 0)
+
+    def _callback_device_lwm2m_put_verification(self, key, value, timestamp):
+        timeout = 0
+
+        # Get resource value from device and increment it
+        resource_value = self.connectApi.get_resource_value_async(self.deviceID, value)
+
+        # Set a 30 second timeout here.
+        while not resource_value.is_done and timeout <= 300:
+            time.sleep(0.1)
+            timeout += 1
+
+        if not resource_value.is_done:
+            self.send_safe("timeout", 0)
+            return
+
+        updated_value = int(resource_value.value) + 5
+
+        # Set new resource value from cloud
+        async_response = self.connectApi.set_resource_value_async(self.deviceID, value, updated_value)
+
+        # Set a 30 second timeout here.
+        while not async_response.is_done and timeout <= 300:
+            time.sleep(0.1)
+            timeout += 1
+
+        if not async_response.is_done:
+            self.send_safe("timeout", 0)
+        else:
+            # Send new resource value to device for verification.
+            self.send_safe("res_set", updated_value);
+
     def _callback_device_lwm2m_post_verification(self, key, value, timestamp):
-        global deviceID
-        
+        timeout = 0
+
         # Execute POST function on device
-        resource_value = self.connectApi.execute_resource(deviceID, value)
-        
+        resource_value = self.connectApi.execute_resource_async(self.deviceID, value)
+
+        # Set a 30 second timeout here.
+        while not resource_value.is_done and timeout <= 300:
+            time.sleep(0.1)
+            timeout += 1
+
+        if not resource_value.is_done:
+            self.send_safe("timeout", 0)
+            self.post_timeout = 1
+
     def _callback_device_lwm2m_post_verification_result(self, key, value, timestamp):
-        
+
         # Called from callback function on device, POST function working as expected.
-        self.send_kv("post_test_executed", 0)
+        # If post_timeout is not none, the request took longer than 30 seconds, which is
+        # a failure. Don't send this value.
+        if not self.post_timeout:
+            self.send_safe("post_test_executed", 0)
 
     def setup(self):
         #Start at iteration 0
-        global iteration
-        iteration = 0
-        
+        self.iteration = 0
+
         # Register callbacks from GT tests
         self.register_callback('device_api_registration', self._callback_device_api_registration)
         self.register_callback('advance_test', self._callback_advance_test)
@@ -131,10 +192,11 @@ class SDKTests(BaseHostTest):
         self.register_callback('device_verification', self._callback_device_verification)
         self.register_callback('fail_test', self._callback_fail_test)
         self.register_callback('device_lwm2m_get_test', self._callback_device_lwm2m_get_verification)
+        self.register_callback('device_lwm2m_set_test', self._callback_device_lwm2m_set_verification)
         self.register_callback('device_lwm2m_put_test', self._callback_device_lwm2m_put_verification)
         self.register_callback('device_lwm2m_post_test', self._callback_device_lwm2m_post_verification)
         self.register_callback('device_lwm2m_post_test_result', self._callback_device_lwm2m_post_verification_result)
-        
+
         # Setup API config
         try:
             result = subprocess.check_output(["mbed", "config", "-G", "CLOUD_SDK_API_KEY"], \
@@ -150,24 +212,28 @@ class SDKTests(BaseHostTest):
 
         # Get API KEY and remove LF char if included
         api_key_val = str(result[1]).rstrip()
-        print "CLOUD_SDK_API_KEY: " + api_key_val 
+        print "CLOUD_SDK_API_KEY: " + api_key_val
 
         api_config = {"api_key" : api_key_val, "host" : "https://api.us-east-1.mbedcloud.com"}
-        
+
         # Instantiate Device and Connect API
         self.deviceApi = DeviceDirectoryAPI(api_config)
         self.connectApi = ConnectAPI(api_config)
-        
+
     def result(self):
         return self.__result
 
     def teardown(self):
+        # Delete device from directory so as not to hit device allocation quota.
+        if self.deviceID:
+            self.deviceApi.delete_device(self.deviceID)
+
         pass
-    
+
     def __init__(self):
         super(SDKTests, self).__init__()
         cycle_s = self.get_config_item('program_cycle_s')
         self.program_cycle_s = cycle_s if cycle_s is not None else DEFAULT_CYCLE_PERIOD
-        
+
         self.test_steps_sequence = self.test_steps()
         self.test_steps_sequence.send(None)
