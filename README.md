@@ -18,7 +18,7 @@ This library is a simpler interface to Pelion DM Client, making it trivial to ex
     ```
     $ mbed add https://github.com/ARMmbed/simple-mbed-cloud-client
     ```
-    If you do not have the Mbed OS project to add, please create one
+    If you do not have an Mbed OS project to add, please create one with 'mbed new' and then 'mbed add' with above step.
     ```
     $ mbed new <your_test_project_name>
     ```
